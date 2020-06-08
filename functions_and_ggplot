@@ -1,0 +1,126 @@
+rm(list=ls())
+library(XML)
+setwd("c:/Users/djl/Documents/summer project")
+library(rio)
+library(data.table)
+library(stringr)
+library(xlsx)
+library(matrixStats)
+library(ggplot2)
+dataclean<-import("data_clean.xlsx")
+dataclean<-dataclean[-which(grepl('NA',dataclean$treatment1)),]
+dataclean<-dataclean[-which(grepl('NA',dataclean$treatment2)),]
+dataclean<-dataclean[-which(grepl('NA',dataclean$treatment3)),]
+dataclean<-dataclean[-which(grepl('NA',dataclean$treatment4)),]
+
+
+#BOOTDATA is our data but as done immediately above, you need to remove the NA's from our
+#treatment columns. 
+#INGROUPS are the treatment groups you want to look at, 1st 4 rows in the returned data
+#are mean and confidence intervals for these groups. Next 4 rows in returned data are
+#mean/CI for all other groups that are not excluded. Last 4 returned rows are the mean/CIs
+#for the difference between in groups and the other, not excluded groups.
+#EXCLUDEDGROUPS are entered the same way as ingroups and are those that will be removed 
+#from the ingroup/outgroup comparison. for example if we want to compare experts versus
+#non experts then we would want to exclude group 9, the control group
+#LISTCONDITIONS are variables and the variable values that we want to look. It requres list type data
+#where the names of the various list(s) are the variables(columns) in our data and the values
+#within the lists are the values want to select on. 
+#so pass in list(column name = "responses you want included", second column name = "responses 
+#for that variable that we are interested in", ect.) <-you can add more than one
+#value in a column by separating with '|'
+#BOOTNUM is the number of bootstrap samples to draw for creating confidence intervals
+
+condinterval<-function(bootdata,ingroups,excludedgroups="zzz",listconditions=NA,bootnum){
+
+    outcome<-rbind(rep(NA,12),rep(NA,12))
+  bootdata<-bootdata[-which(grepl(paste0(paste0(excludedgroups,sep = "|",collapse = ""),"zzz",collapse = ""),bootdata$group)),]
+  for(i in 1:bootnum){
+  temp<-bootdata[sample(1:nrow(bootdata),nrow(bootdata),replace = TRUE),]
+  if(!is.na(listconditions)){
+    for(j in length(listconditions)){
+      k<-which(colnames(temp)== names(listconditions)[j])
+      temp<-temp[grep(listconditions[j],as.character(temp[,k])),]
+    }
+  }
+  ingrouptemp<-temp[which(grepl(paste0(paste0(ingroups,sep = "|",collapse = ""),"zzz",collapse = ""),temp$group)),22:25]
+  outgrouptemp<-temp[-which(grepl(paste0(paste0(ingroups,sep = "|",collapse = ""),"zzz",collapse = ""),temp$group)),22:25]
+  outcome<-rbind(outcome,c(colMeans(data.matrix(ingrouptemp)),colMeans(data.matrix(outgrouptemp)),colMeans(data.matrix(ingrouptemp))-colMeans(data.matrix(outgrouptemp))))
+  }
+
+returnvalues<-as.data.frame(cbind(colMeans(na.omit(outcome)),colQuantiles(na.omit(outcome),probs = c(.025,.975))))
+names(returnvalues)[1]<-"means"
+return(returnvalues)
+
+}
+
+
+
+####same thing as condinterval but compares across independent variable groups
+####listdiff and listcompare should be two seperate numeric lists labeled as the name of 
+####the variable of interest. Have not tested with character varaibles (not sure if 
+####the %in% function with recognize characters). 
+
+
+
+
+bygroups<-function(bootdata,ingroups,excludedgroups="zzz",listdiff,listcompare,listconditions=NA,bootnum){
+  
+  outcome<-rbind(rep(NA,12),rep(NA,12))
+  bootdata<-bootdata[-which(grepl(paste0(paste0(excludedgroups,sep = "|",collapse = ""),"zzz",collapse = ""),bootdata$group)),]
+    for(i in 1:bootnum){
+    temp<-bootdata[sample(1:nrow(bootdata),nrow(bootdata),replace = TRUE),]
+    if(!is.na(listconditions)){
+      for(j in length(listconditions)){
+        k<-which(colnames(temp)== names(listconditions)[j])
+        temp<-temp[grep(listconditions[j],as.character(temp[,k])),]
+      }
+    }
+    m<-which(colnames(temp)==names(listdiff))
+    category1<-subset.data.frame(temp,temp[,m] %in% unlist(listdiff))
+    category2<-subset.data.frame(temp,temp[,m] %in% unlist(listcompare))
+    ingtemp1<-category1[which(grepl(paste0(paste0(ingroups,sep = "|",collapse = ""),"zzz",collapse = ""),category1$group)),22:25]
+    outgtemp1<-category1[-which(grepl(paste0(paste0(ingroups,sep = "|",collapse = ""),"zzz",collapse = ""),category1$group)),22:25]
+    ingtemp2<-category2[which(grepl(paste0(paste0(ingroups,sep = "|",collapse = ""),"zzz",collapse = ""),category2$group)),22:25]
+    outgtemp2<-category2[-which(grepl(paste0(paste0(ingroups,sep = "|",collapse = ""),"zzz",collapse = ""),category2$group)),22:25]
+    
+    cat1treat<-(colMeans(data.matrix(ingtemp1))-colMeans(data.matrix(outgtemp1)))
+    cat2treat<-(colMeans(data.matrix(ingtemp2))-colMeans(data.matrix(outgtemp2)))
+    treatdiff<-cat1treat-cat2treat
+    
+    outcome<-rbind(outcome,c(cat1treat,cat2treat,treatdiff))
+  }
+  
+  returnvalues<-as.data.frame(cbind(colMeans(na.omit(outcome)),colQuantiles(na.omit(outcome),probs = c(.025,.975))))
+  names(returnvalues)[1]<-"means"
+  return(returnvalues)
+  
+}
+
+
+
+###########Main Plot#######################################
+#Expert v non
+mp1<-condinterval(dataclean,c(1,2,3,4),excludedgroups = c(9),bootnum = 1000)
+#Gain v Loss
+mp2<-condinterval(dataclean,c(1,3,5,7),c(9),bootnum = 1000)
+#Fact V Experience
+mp3<-condinterval(dataclean,c(1,2,5,6),c(9),bootnum = 1000)
+
+
+mainplot<-cbind(ref = as.factor(c(1,1,1,1,2,2,2,2,3,3,3,3)),Treatment = as.factor(c(1,2,3,4,1,2,3,4,1,2,3,4)),rbind(mp1[9:12,],mp2[9:12,],mp3[9:12,]))
+names(mainplot)[c(4,5)]<-c('low','hi')
+
+ggplot(mainplot, aes(x = ref,y=means,ymin=low,ymax=hi,shape = Treatment,color=Treatment))+
+  geom_errorbar(position = 'dodge2',size = 1)+geom_point(position = position_dodge(width = .9),size = 3)+
+  scale_x_discrete(labels=c('1'='Expert v Non-Expert','2'='Gain v Loss','3'='Fact v Experience'))+
+  labs(title = "Main Treatment Effects with Confidence Intervals",
+       y = 'Difference in Means',x = NULL,
+       caption = "Confidence intervals derived from nonparametric bootstrapping with 95% confidence.")+
+  theme_test()+geom_hline(yintercept=c(0), linetype="dotted")+
+  scale_color_manual(values = c("#0072B2", "#D55E00","#52854C","#C4961A"),labels = c('Group 1','Group 2','Group 3','Group 4'))+
+  scale_shape_manual(values = c(0,2,7,8),labels = c('Group 1','Group 2','Group 3','Group 4'))+
+  theme(axis.text.x = element_text(face = 'bold'),plot.caption = element_text(face = "italic",size = 6.5))
+  ggsave('mainplot.jpeg')
+
+
